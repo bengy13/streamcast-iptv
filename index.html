@@ -457,7 +457,18 @@
     .empty-state p { font-size: 0.82rem; }
 
     /* fullscreen tweaks */
+    :fullscreen .app-body, :-webkit-full-screen .app-body { height: 100%; }
     :fullscreen video, :-webkit-full-screen video { object-fit: contain; }
+
+    /* En fullscreen, el reproductor ocupa todo el espacio */
+    :fullscreen .player-wrap::before, :-webkit-full-screen .player-wrap::before { padding-top: 0; }
+    :fullscreen .player-wrap, :-webkit-full-screen .player-wrap {
+      flex: 1;
+      height: 100%;
+    }
+    :fullscreen main, :-webkit-full-screen main {
+      background: #000;
+    }
 
     .pip-btn { display: none; }
     @supports (picture-in-picture: auto) { .pip-btn { display: flex; } }
@@ -834,12 +845,26 @@ $sidebarToggle.addEventListener('click', () => {
 
 // ── FULLSCREEN ──
 $fsBtn.addEventListener('click', () => {
-  if (!document.fullscreenElement) {
-    $playerWrap.requestFullscreen?.() || $playerWrap.webkitRequestFullscreen?.();
+  const el = document.documentElement; // toda la app, no solo el reproductor
+  if (!document.fullscreenElement && !document.webkitFullscreenElement) {
+    (el.requestFullscreen || el.webkitRequestFullscreen || el.mozRequestFullScreen).call(el);
+    $fsBtn.title = 'Salir de pantalla completa';
   } else {
-    document.exitFullscreen?.() || document.webkitExitFullscreen?.();
+    (document.exitFullscreen || document.webkitExitFullscreen || document.mozCancelFullScreen).call(document);
+    $fsBtn.title = 'Pantalla completa';
   }
 });
+
+// Actualiza el ícono del botón al cambiar estado fullscreen
+document.addEventListener('fullscreenchange', updateFsIcon);
+document.addEventListener('webkitfullscreenchange', updateFsIcon);
+function updateFsIcon() {
+  const isFs = !!(document.fullscreenElement || document.webkitFullscreenElement);
+  $fsBtn.classList.toggle('active', isFs);
+  $fsBtn.innerHTML = isFs
+    ? `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 14 10 14 10 20"/><polyline points="20 10 14 10 14 4"/><line x1="10" y1="14" x2="3" y2="21"/><line x1="21" y1="3" x2="14" y2="10"/></svg>`
+    : `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>`;
+}
 
 // ── PICTURE IN PICTURE ──
 $pipBtn.addEventListener('click', async () => {
