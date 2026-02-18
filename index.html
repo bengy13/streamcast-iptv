@@ -1,0 +1,919 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>StreamCast IPTV</title>
+  <meta name="description" content="Reproductor IPTV con soporte Chromecast" />
+  <meta name="theme-color" content="#0a0a0f" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="StreamCast" />
+  <link rel="manifest" href="manifest.json" />
+
+  <!-- Google Cast SDK -->
+  <script src="https://www.gstatic.com/cv/js/sender/v1/cast_sender.js?loadCastFramework=1"></script>
+  <!-- HLS.js -->
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@latest/dist/hls.min.js"></script>
+
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;1,9..40,300&display=swap');
+
+    :root {
+      --bg: #0a0a0f;
+      --bg2: #111118;
+      --bg3: #1a1a24;
+      --border: #2a2a3a;
+      --accent: #00e5ff;
+      --accent2: #7c4dff;
+      --red: #ff3d71;
+      --text: #e8e8f0;
+      --muted: #6b6b80;
+      --sidebar: 300px;
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: 'DM Sans', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      height: 100dvh;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ── HEADER ── */
+    header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 16px;
+      background: var(--bg2);
+      border-bottom: 1px solid var(--border);
+      z-index: 100;
+      flex-shrink: 0;
+    }
+
+    .logo {
+      font-family: 'Rajdhani', sans-serif;
+      font-size: 1.4rem;
+      font-weight: 700;
+      letter-spacing: 2px;
+      color: var(--accent);
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+    .logo span { color: var(--accent2); }
+
+    .search-wrap {
+      flex: 1;
+      position: relative;
+    }
+    .search-wrap input {
+      width: 100%;
+      background: var(--bg3);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 8px 14px 8px 36px;
+      border-radius: 8px;
+      font-family: inherit;
+      font-size: 0.85rem;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    .search-wrap input:focus { border-color: var(--accent); }
+    .search-wrap svg {
+      position: absolute;
+      left: 10px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: var(--muted);
+    }
+
+    .hdr-btns { display: flex; gap: 8px; align-items: center; }
+
+    .btn-icon {
+      background: var(--bg3);
+      border: 1px solid var(--border);
+      color: var(--text);
+      width: 36px; height: 36px;
+      border-radius: 8px;
+      cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      transition: all 0.2s;
+      flex-shrink: 0;
+    }
+    .btn-icon:hover { border-color: var(--accent); color: var(--accent); }
+    .btn-icon.active { border-color: var(--accent); color: var(--accent); background: rgba(0,229,255,0.1); }
+
+    #cast-btn { display: none; }
+    #cast-btn.visible { display: flex; }
+    #cast-btn.casting { border-color: #00e676; color: #00e676; background: rgba(0,230,118,0.1); }
+
+    /* ── LAYOUT ── */
+    .app-body {
+      display: flex;
+      flex: 1;
+      overflow: hidden;
+    }
+
+    /* ── SIDEBAR ── */
+    aside {
+      width: var(--sidebar);
+      background: var(--bg2);
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      transition: transform 0.3s ease;
+      flex-shrink: 0;
+    }
+
+    aside.hidden { transform: translateX(-100%); position: absolute; height: calc(100dvh - 57px); z-index: 50; }
+
+    .categories {
+      display: flex;
+      gap: 6px;
+      padding: 10px 12px;
+      overflow-x: auto;
+      flex-shrink: 0;
+      border-bottom: 1px solid var(--border);
+      scrollbar-width: none;
+    }
+    .categories::-webkit-scrollbar { display: none; }
+
+    .cat-pill {
+      background: var(--bg3);
+      border: 1px solid var(--border);
+      color: var(--muted);
+      padding: 4px 10px;
+      border-radius: 20px;
+      font-size: 0.72rem;
+      white-space: nowrap;
+      cursor: pointer;
+      font-family: 'Rajdhani', sans-serif;
+      font-weight: 600;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+      transition: all 0.2s;
+    }
+    .cat-pill:hover, .cat-pill.active {
+      background: rgba(0,229,255,0.12);
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+
+    .channel-list {
+      overflow-y: auto;
+      flex: 1;
+      scrollbar-width: thin;
+      scrollbar-color: var(--border) transparent;
+    }
+
+    .channel-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 14px;
+      cursor: pointer;
+      border-bottom: 1px solid rgba(255,255,255,0.04);
+      transition: background 0.15s;
+    }
+    .channel-item:hover { background: var(--bg3); }
+    .channel-item.active {
+      background: rgba(0,229,255,0.08);
+      border-left: 3px solid var(--accent);
+    }
+    .ch-logo {
+      width: 40px; height: 28px;
+      object-fit: contain;
+      border-radius: 4px;
+      background: var(--bg3);
+      flex-shrink: 0;
+    }
+    .ch-info { min-width: 0; }
+    .ch-name {
+      font-size: 0.82rem;
+      font-weight: 500;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .ch-group {
+      font-size: 0.68rem;
+      color: var(--muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .ch-num {
+      font-family: 'Rajdhani', sans-serif;
+      font-size: 0.7rem;
+      color: var(--muted);
+      margin-left: auto;
+      flex-shrink: 0;
+    }
+
+    /* ── MAIN ── */
+    main {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      min-width: 0;
+    }
+
+    .player-wrap {
+      position: relative;
+      background: #000;
+      flex-shrink: 0;
+    }
+
+    /* 16:9 aspect ratio */
+    .player-wrap::before {
+      content: '';
+      display: block;
+      padding-top: 56.25%;
+    }
+
+    video {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+    }
+
+    .player-overlay {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      gap: 12px;
+      background: rgba(0,0,0,0.7);
+      transition: opacity 0.3s;
+    }
+    .player-overlay.hidden { opacity: 0; pointer-events: none; }
+    .overlay-icon { color: var(--accent); opacity: 0.7; }
+    .overlay-msg {
+      font-family: 'Rajdhani', sans-serif;
+      font-size: 1rem;
+      letter-spacing: 2px;
+      color: var(--muted);
+      text-transform: uppercase;
+    }
+
+    .casting-overlay {
+      position: absolute;
+      inset: 0;
+      background: #000;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      gap: 14px;
+    }
+    .casting-overlay.active { display: flex; }
+    .cast-animation {
+      width: 60px; height: 60px;
+      border-radius: 50%;
+      border: 3px solid transparent;
+      border-top-color: #00e676;
+      animation: spin 1s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Player controls bar */
+    .controls-bar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 12px;
+      background: var(--bg2);
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .now-playing {
+      flex: 1;
+      min-width: 0;
+    }
+    .np-label {
+      font-size: 0.65rem;
+      color: var(--accent);
+      font-family: 'Rajdhani', sans-serif;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+    }
+    .np-name {
+      font-size: 0.85rem;
+      font-weight: 500;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .vol-wrap { display: flex; align-items: center; gap: 6px; }
+    input[type=range] {
+      -webkit-appearance: none;
+      width: 80px; height: 4px;
+      background: var(--border);
+      border-radius: 2px;
+      outline: none;
+    }
+    input[type=range]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 12px; height: 12px;
+      border-radius: 50%;
+      background: var(--accent);
+      cursor: pointer;
+    }
+
+    /* info panel */
+    .info-panel {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px;
+      scrollbar-width: thin;
+      scrollbar-color: var(--border) transparent;
+    }
+
+    .info-title {
+      font-family: 'Rajdhani', sans-serif;
+      font-size: 0.7rem;
+      letter-spacing: 2px;
+      color: var(--muted);
+      text-transform: uppercase;
+      margin-bottom: 12px;
+    }
+
+    .info-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+      gap: 10px;
+    }
+
+    .info-card {
+      background: var(--bg3);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .info-card:hover {
+      border-color: var(--accent);
+      transform: translateY(-2px);
+    }
+    .info-card img {
+      width: 100%; height: 50px;
+      object-fit: contain;
+      margin-bottom: 8px;
+    }
+    .info-card-name {
+      font-size: 0.75rem;
+      font-weight: 500;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .info-card-grp {
+      font-size: 0.65rem;
+      color: var(--muted);
+    }
+
+    /* Loading state */
+    .loading-bar {
+      height: 2px;
+      background: linear-gradient(90deg, var(--accent2), var(--accent));
+      animation: loadbar 1.5s ease-in-out infinite;
+      display: none;
+    }
+    .loading-bar.active { display: block; }
+    @keyframes loadbar {
+      0% { transform: scaleX(0) translateX(0); transform-origin: left; }
+      50% { transform: scaleX(1); transform-origin: left; }
+      100% { transform: scaleX(0) translateX(100%); transform-origin: right; }
+    }
+
+    .error-toast {
+      position: fixed;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%) translateY(80px);
+      background: var(--red);
+      color: #fff;
+      padding: 10px 18px;
+      border-radius: 8px;
+      font-size: 0.82rem;
+      z-index: 999;
+      transition: transform 0.3s;
+    }
+    .error-toast.show { transform: translateX(-50%) translateY(0); }
+
+    /* MOBILE */
+    @media (max-width: 700px) {
+      :root { --sidebar: 100%; }
+      aside {
+        position: absolute;
+        height: calc(100dvh - 57px);
+        z-index: 50;
+        transform: translateX(-100%);
+      }
+      aside.open { transform: translateX(0); }
+      .app-body { position: relative; }
+      input[type=range] { width: 60px; }
+    }
+
+    /* custom scrollbar */
+    ::-webkit-scrollbar { width: 4px; height: 4px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+    .badge {
+      background: var(--accent);
+      color: #000;
+      font-size: 0.6rem;
+      font-family: 'Rajdhani', sans-serif;
+      font-weight: 700;
+      letter-spacing: 1px;
+      padding: 1px 5px;
+      border-radius: 3px;
+      text-transform: uppercase;
+      margin-left: 6px;
+      vertical-align: middle;
+    }
+
+    .empty-state {
+      padding: 40px 20px;
+      text-align: center;
+      color: var(--muted);
+    }
+    .empty-state svg { margin-bottom: 12px; color: var(--border); }
+    .empty-state p { font-size: 0.82rem; }
+
+    /* fullscreen tweaks */
+    :fullscreen video, :-webkit-full-screen video { object-fit: contain; }
+
+    .pip-btn { display: none; }
+    @supports (picture-in-picture: auto) { .pip-btn { display: flex; } }
+  </style>
+</head>
+<body>
+
+<!-- HEADER -->
+<header>
+  <div class="logo">Stream<span>Cast</span></div>
+
+  <div class="search-wrap">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+    <input type="text" id="search" placeholder="Buscar canales..." autocomplete="off" />
+  </div>
+
+  <div class="hdr-btns">
+    <button class="btn-icon" id="sidebar-toggle" title="Canales">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+    </button>
+    <button class="btn-icon" id="cast-btn" title="Transmitir a Chromecast">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 8.5A12.5 12.5 0 0 1 14.5 21"/><path d="M2 3a17 17 0 0 1 17 17"/><circle cx="2" cy="21" r="1" fill="currentColor"/><rect x="14" y="3" width="8" height="14" rx="1"/><path d="M14 8H6v13"/></svg>
+    </button>
+    <button class="btn-icon pip-btn" id="pip-btn" title="Picture in Picture">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><rect x="12" y="10" width="8" height="7" rx="1"/></svg>
+    </button>
+    <button class="btn-icon" id="fullscreen-btn" title="Pantalla completa">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
+    </button>
+  </div>
+</header>
+
+<div class="loading-bar" id="loading-bar"></div>
+
+<!-- BODY -->
+<div class="app-body">
+
+  <!-- SIDEBAR -->
+  <aside id="sidebar">
+    <div class="categories" id="categories">
+      <div class="cat-pill active" data-cat="all">Todo</div>
+    </div>
+    <div class="channel-list" id="channel-list">
+      <div class="empty-state">
+        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+        <p>Cargando catálogo de canales...</p>
+      </div>
+    </div>
+  </aside>
+
+  <!-- MAIN -->
+  <main id="main">
+    <!-- Video -->
+    <div class="player-wrap" id="player-wrap">
+      <video id="video" playsinline></video>
+
+      <div class="player-overlay" id="player-overlay">
+        <svg class="overlay-icon" width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <rect x="2" y="7" width="20" height="15" rx="2"/><polyline points="17 2 12 7 7 2"/>
+        </svg>
+        <div class="overlay-msg">Selecciona un canal</div>
+      </div>
+
+      <div class="casting-overlay" id="casting-overlay">
+        <div class="cast-animation"></div>
+        <div class="overlay-msg" style="color:#00e676">Transmitiendo a TV</div>
+        <div id="cast-channel-name" style="color:var(--muted);font-size:0.8rem"></div>
+      </div>
+    </div>
+
+    <!-- Controls -->
+    <div class="controls-bar">
+      <div class="now-playing">
+        <div class="np-label">En reproducción</div>
+        <div class="np-name" id="np-name">—</div>
+      </div>
+      <div class="vol-wrap">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
+        <input type="range" id="volume" min="0" max="1" step="0.05" value="1" />
+      </div>
+      <button class="btn-icon" id="mute-btn" title="Silenciar">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" id="mute-icon"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>
+      </button>
+    </div>
+
+    <!-- Info Grid -->
+    <div class="info-panel">
+      <div class="info-title" id="info-title">Canales destacados <span class="badge" id="ch-count"></span></div>
+      <div class="info-grid" id="info-grid"></div>
+    </div>
+  </main>
+</div>
+
+<div class="error-toast" id="error-toast"></div>
+
+<script>
+// ── PROXIES (cadena de fallback) ──
+const PROXIES = [
+  u => `https://corsproxy.io/?${encodeURIComponent(u)}`,
+  u => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
+  u => `https://proxy.cors.sh/${u}`,
+];
+let proxyIdx = 0;
+function getProxy(u) { return PROXIES[proxyIdx % PROXIES.length](u); }
+function nextProxy() { proxyIdx++; }
+
+// Loader de HLS.js que pasa TODOS los segmentos/manifests por el proxy
+function makeProxyLoader() {
+  const Base = Hls.DefaultConfig.loader;
+  return class ProxyLoader extends Base {
+    load(ctx, cfg, cbs) {
+      const already = PROXIES.some(fn => {
+        try { const t = fn('x'); return ctx.url.startsWith(t.replace('x','')); } catch{ return false; }
+      });
+      if (!already) ctx.url = getProxy(ctx.url);
+      super.load(ctx, cfg, cbs);
+    }
+  };
+}
+
+// ── STATE ──
+const state = {
+  channels: [],
+  filtered: [],
+  currentChannel: null,
+  currentCategory: 'all',
+  hls: null,
+  casting: false,
+  castSession: null,
+  retryCount: 0,
+};
+
+const M3U_URL = 'https://iptv-org.github.io/iptv/index.m3u';
+
+// ── ELEMENTS ──
+const $video        = document.getElementById('video');
+const $chList       = document.getElementById('channel-list');
+const $cats         = document.getElementById('categories');
+const $search       = document.getElementById('search');
+const $npName       = document.getElementById('np-name');
+const $overlay      = document.getElementById('player-overlay');
+const $castOverlay  = document.getElementById('casting-overlay');
+const $castBtn      = document.getElementById('cast-btn');
+const $castChName   = document.getElementById('cast-channel-name');
+const $loadingBar   = document.getElementById('loading-bar');
+const $errorToast   = document.getElementById('error-toast');
+const $infoGrid     = document.getElementById('info-grid');
+const $infoTitle    = document.getElementById('info-title');
+const $chCount      = document.getElementById('ch-count');
+const $volume       = document.getElementById('volume');
+const $muteBtn      = document.getElementById('mute-btn');
+const $sidebar      = document.getElementById('sidebar');
+const $sidebarToggle= document.getElementById('sidebar-toggle');
+const $fsBtn        = document.getElementById('fullscreen-btn');
+const $pipBtn       = document.getElementById('pip-btn');
+const $playerWrap   = document.getElementById('player-wrap');
+
+// ── UTILS ──
+function showLoading(v) { $loadingBar.classList.toggle('active', v); }
+
+function showError(msg, ms = 3500) {
+  $errorToast.textContent = msg;
+  $errorToast.classList.add('show');
+  setTimeout(() => $errorToast.classList.remove('show'), ms);
+}
+
+// ── PARSE M3U ──
+function parseM3U(text) {
+  const lines = text.split('\n');
+  const channels = [];
+  let meta = {};
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (line.startsWith('#EXTINF:')) {
+      meta = {};
+      // Extract attributes
+      const tvgName  = line.match(/tvg-name="([^"]*)"/)?.[1] || '';
+      const tvgLogo  = line.match(/tvg-logo="([^"]*)"/)?.[1] || '';
+      const grpTitle = line.match(/group-title="([^"]*)"/)?.[1] || 'Sin categoría';
+      const tvgId    = line.match(/tvg-id="([^"]*)"/)?.[1] || '';
+      // Channel name from end of line
+      const namePart = line.split(',').slice(-1)[0]?.trim() || tvgName || 'Canal';
+      meta = { name: namePart || tvgName, logo: tvgLogo, group: grpTitle, id: tvgId };
+    } else if (line && !line.startsWith('#') && meta.name) {
+      channels.push({ ...meta, url: line });
+      meta = {};
+    }
+  }
+  return channels;
+}
+
+// ── LOAD M3U ──
+async function loadM3U() {
+  showLoading(true);
+  try {
+    let res = await fetch(getProxy(M3U_URL));
+    // retry with next proxy if fails
+    if (!res.ok) { nextProxy(); res = await fetch(getProxy(M3U_URL)); }
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const text = await res.text();
+    state.channels = parseM3U(text);
+    if (!state.channels.length) throw new Error('No se encontraron canales');
+    state.filtered = [...state.channels];
+    buildCategories();
+    renderChannels();
+    renderInfoGrid();
+    $chCount.textContent = state.channels.length;
+  } catch (e) {
+    showError('Error cargando catálogo: ' + e.message);
+    $chList.innerHTML = `<div class="empty-state">
+      <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+      <p>Error al cargar los canales.<br>Intenta recargar la página.</p>
+    </div>`;
+  } finally {
+    showLoading(false);
+  }
+}
+
+// ── CATEGORIES ──
+function buildCategories() {
+  const cats = ['all', ...new Set(state.channels.map(c => c.group).filter(Boolean).sort())];
+  $cats.innerHTML = cats.map(c => `
+    <div class="cat-pill${c === state.currentCategory ? ' active' : ''}" data-cat="${c}">
+      ${c === 'all' ? 'Todo' : c}
+    </div>
+  `).join('');
+
+  $cats.querySelectorAll('.cat-pill').forEach(el => {
+    el.addEventListener('click', () => {
+      state.currentCategory = el.dataset.cat;
+      $cats.querySelectorAll('.cat-pill').forEach(p => p.classList.remove('active'));
+      el.classList.add('active');
+      applyFilter();
+    });
+  });
+}
+
+// ── FILTER ──
+function applyFilter() {
+  const q = $search.value.toLowerCase();
+  state.filtered = state.channels.filter(c => {
+    const matchCat = state.currentCategory === 'all' || c.group === state.currentCategory;
+    const matchQ   = !q || c.name.toLowerCase().includes(q) || (c.group || '').toLowerCase().includes(q);
+    return matchCat && matchQ;
+  });
+  renderChannels();
+  renderInfoGrid();
+}
+
+// ── RENDER CHANNELS ──
+function renderChannels() {
+  if (!state.filtered.length) {
+    $chList.innerHTML = `<div class="empty-state"><p>Sin resultados para tu búsqueda.</p></div>`;
+    return;
+  }
+  $chList.innerHTML = state.filtered.slice(0, 300).map((c, i) => `
+    <div class="channel-item${state.currentChannel?.url === c.url ? ' active' : ''}" data-idx="${i}">
+      <img class="ch-logo" src="${c.logo || ''}" alt="" loading="lazy"
+           onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 40 28%22><rect width=%2240%22 height=%2228%22 fill=%22%231a1a24%22 rx=%224%22/><text x=%2220%22 y=%2219%22 text-anchor=%22middle%22 font-size=%2210%22 fill=%22%236b6b80%22>TV</text></svg>'" />
+      <div class="ch-info">
+        <div class="ch-name">${c.name}</div>
+        <div class="ch-group">${c.group || ''}</div>
+      </div>
+      <div class="ch-num">${i + 1}</div>
+    </div>
+  `).join('');
+
+  $chList.querySelectorAll('.channel-item').forEach(el => {
+    el.addEventListener('click', () => {
+      const ch = state.filtered[+el.dataset.idx];
+      playChannel(ch);
+    });
+  });
+}
+
+// ── RENDER INFO GRID (highlighted channels) ──
+function renderInfoGrid() {
+  const sample = state.filtered.filter(c => c.logo).slice(0, 24);
+  if (!sample.length) { $infoGrid.innerHTML = ''; return; }
+  $infoGrid.innerHTML = sample.map((c, i) => `
+    <div class="info-card" data-idx="${i}">
+      <img src="${c.logo}" alt="${c.name}" loading="lazy"
+           onerror="this.style.display='none'" />
+      <div class="info-card-name">${c.name}</div>
+      <div class="info-card-grp">${c.group || ''}</div>
+    </div>
+  `).join('');
+
+  $infoGrid.querySelectorAll('.info-card').forEach(el => {
+    el.addEventListener('click', () => playChannel(sample[+el.dataset.idx]));
+  });
+}
+
+// ── PLAY ──
+function playChannel(ch, retry = 0) {
+  state.currentChannel = ch;
+  state.retryCount = retry;
+  $npName.textContent = ch.name;
+  $overlay.classList.add('hidden');
+
+  // Update active state in list
+  document.querySelectorAll('.channel-item').forEach(el => el.classList.remove('active'));
+  document.querySelectorAll('.channel-item').forEach(el => {
+    if (state.filtered[+el.dataset.idx]?.url === ch.url) el.classList.add('active');
+  });
+
+  if (state.casting && state.castSession) {
+    castMedia(ch);
+    return;
+  }
+
+  // Destroy prev HLS
+  if (state.hls) { state.hls.destroy(); state.hls = null; }
+
+  const url = ch.url;
+
+  if (Hls.isSupported()) {
+    const ProxyLoader = makeProxyLoader();
+    state.hls = new Hls({
+      enableWorker: true,
+      lowLatencyMode: true,
+      loader: ProxyLoader,
+      xhrSetup: (xhr, u) => {
+        // Fallback: if XHR is used directly, also proxy it
+      },
+    });
+    // Proxy the manifest URL itself
+    state.hls.loadSource(getProxy(url));
+    state.hls.attachMedia($video);
+    state.hls.on(Hls.Events.MANIFEST_PARSED, () => $video.play().catch(() => {}));
+    state.hls.on(Hls.Events.ERROR, (_, data) => {
+      if (data.fatal) {
+        if (retry < PROXIES.length - 1) {
+          // Try next proxy silently
+          nextProxy();
+          setTimeout(() => playChannel(ch, retry + 1), 600);
+        } else {
+          showError('No se pudo cargar el stream. Prueba otro canal.');
+          $overlay.classList.remove('hidden');
+        }
+      }
+    });
+  } else if ($video.canPlayType('application/vnd.apple.mpegurl')) {
+    // Safari native HLS — proxy the URL
+    $video.src = getProxy(url);
+    $video.play().catch(() => {});
+  } else {
+    // Fallback: direct URL via proxy
+    $video.src = getProxy(url);
+    $video.play().catch(() => showError('Formato no soportado por tu navegador.'));
+  }
+
+  // Close sidebar on mobile
+  if (window.innerWidth <= 700) $sidebar.classList.remove('open');
+}
+
+// ── VOLUME ──
+$volume.addEventListener('input', () => { $video.volume = $volume.value; });
+$muteBtn.addEventListener('click', () => {
+  $video.muted = !$video.muted;
+  $muteBtn.classList.toggle('active', $video.muted);
+});
+
+// ── SIDEBAR TOGGLE ──
+$sidebarToggle.addEventListener('click', () => {
+  if (window.innerWidth <= 700) {
+    $sidebar.classList.toggle('open');
+  } else {
+    $sidebar.classList.toggle('hidden');
+  }
+  $sidebarToggle.classList.toggle('active');
+});
+
+// ── FULLSCREEN ──
+$fsBtn.addEventListener('click', () => {
+  if (!document.fullscreenElement) {
+    $playerWrap.requestFullscreen?.() || $playerWrap.webkitRequestFullscreen?.();
+  } else {
+    document.exitFullscreen?.() || document.webkitExitFullscreen?.();
+  }
+});
+
+// ── PICTURE IN PICTURE ──
+$pipBtn.addEventListener('click', async () => {
+  if ($video !== document.pictureInPictureElement) {
+    try { await $video.requestPictureInPicture(); }
+    catch(e) { showError('PiP no disponible: ' + e.message); }
+  } else {
+    document.exitPictureInPicture();
+  }
+});
+
+// ── SEARCH ──
+$search.addEventListener('input', applyFilter);
+
+// ── CHROMECAST ──
+window.__onGCastApiAvailable = function(isAvailable) {
+  if (!isAvailable) return;
+  cast.framework.CastContext.getInstance().setOptions({
+    receiverApplicationId: chrome.cast.media.DEFAULT_MEDIA_RECEIVER_APP_ID,
+    autoJoinPolicy: chrome.cast.AutoJoinPolicy.ORIGIN_SCOPED,
+  });
+
+  $castBtn.classList.add('visible');
+
+  const ctx = cast.framework.CastContext.getInstance();
+  ctx.addEventListener(cast.framework.CastContextEventType.SESSION_STATE_CHANGED, e => {
+    const s = e.sessionState;
+    if (s === cast.framework.SessionState.SESSION_STARTED ||
+        s === cast.framework.SessionState.SESSION_RESUMED) {
+      state.casting = true;
+      state.castSession = cast.framework.CastContext.getInstance().getCurrentSession();
+      $castBtn.classList.add('casting');
+      $castOverlay.classList.add('active');
+      if (state.currentChannel) castMedia(state.currentChannel);
+    } else if (s === cast.framework.SessionState.SESSION_ENDED) {
+      state.casting = false;
+      state.castSession = null;
+      $castBtn.classList.remove('casting');
+      $castOverlay.classList.remove('active');
+    }
+  });
+};
+
+$castBtn.addEventListener('click', () => {
+  const ctx = cast.framework.CastContext.getInstance();
+  ctx.requestSession().catch(e => {
+    if (e !== 'cancel') showError('No se pudo conectar al Chromecast');
+  });
+});
+
+function castMedia(ch) {
+  if (!state.castSession) return;
+  $castChName.textContent = ch.name;
+
+  // Use proxied URL so Chromecast can reach the stream
+  const streamUrl = getProxy(ch.url);
+  const mediaInfo = new chrome.cast.media.MediaInfo(streamUrl, 'application/x-mpegURL');
+  mediaInfo.streamType = chrome.cast.media.StreamType.LIVE;
+  mediaInfo.metadata = new chrome.cast.media.GenericMediaMetadata();
+  mediaInfo.metadata.title = ch.name;
+  if (ch.logo) mediaInfo.metadata.images = [new chrome.cast.Image(ch.logo)];
+
+  const req = new chrome.cast.media.LoadRequest(mediaInfo);
+  state.castSession.loadMedia(req).catch(() => showError('Error al enviar a Chromecast'));
+}
+
+// ── SERVICE WORKER ──
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('./sw.js').catch(() => {});
+}
+
+// ── START ──
+loadM3U();
+</script>
+
+</body>
+</html>
