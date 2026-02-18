@@ -448,6 +448,15 @@
       vertical-align: middle;
     }
 
+    .mini-spinner {
+      width: 32px; height: 32px;
+      border: 3px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      margin: 0 auto 12px;
+    }
+
     .empty-state {
       padding: 40px 20px;
       text-align: center;
@@ -565,25 +574,36 @@
 <div class="error-toast" id="error-toast"></div>
 
 <script>
-// ── PROXIES (cadena de fallback) ──
-const PROXIES = [
+// ── PROXIES — múltiples opciones con fallback automático ──
+const M3U_PROXIES = [
   u => `https://corsproxy.io/?${encodeURIComponent(u)}`,
   u => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
-  u => `https://proxy.cors.sh/${u}`,
+  u => `https://thingproxy.freeboard.io/fetch/${u}`,
+  u => `https://api.codetabs.com/v1/proxy?quest=${u}`,
+  u => `https://cors.bridged.cc/${u}`,
 ];
-let proxyIdx = 0;
-function getProxy(u) { return PROXIES[proxyIdx % PROXIES.length](u); }
-function nextProxy() { proxyIdx++; }
 
-// Loader de HLS.js que pasa TODOS los segmentos/manifests por el proxy
+// Proxy para streams HLS (más liviano, sin encode)
+const STREAM_PROXIES = [
+  u => `https://corsproxy.io/?${encodeURIComponent(u)}`,
+  u => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
+  u => `https://thingproxy.freeboard.io/fetch/${u}`,
+];
+let streamProxyIdx = 0;
+function getStreamProxy(u) { return STREAM_PROXIES[streamProxyIdx % STREAM_PROXIES.length](u); }
+function nextStreamProxy() { streamProxyIdx = (streamProxyIdx + 1) % STREAM_PROXIES.length; }
+
+// Loader de HLS.js que pasa TODOS los segmentos por el proxy
 function makeProxyLoader() {
   const Base = Hls.DefaultConfig.loader;
   return class ProxyLoader extends Base {
     load(ctx, cfg, cbs) {
-      const already = PROXIES.some(fn => {
-        try { const t = fn('x'); return ctx.url.startsWith(t.replace('x','')); } catch{ return false; }
-      });
-      if (!already) ctx.url = getProxy(ctx.url);
+      const isAlready = ctx.url.includes('corsproxy.io') ||
+                        ctx.url.includes('allorigins.win') ||
+                        ctx.url.includes('thingproxy') ||
+                        ctx.url.includes('codetabs.com') ||
+                        ctx.url.includes('bridged.cc');
+      if (!isAlready) ctx.url = getStreamProxy(ctx.url);
       super.load(ctx, cfg, cbs);
     }
   };
@@ -661,28 +681,49 @@ function parseM3U(text) {
   return channels;
 }
 
-// ── LOAD M3U ──
+// ── LOAD M3U — intenta todos los proxies uno por uno ──
 async function loadM3U() {
   showLoading(true);
+  $chList.innerHTML = `<div class="empty-state">
+    <div class="mini-spinner"></div>
+    <p>Cargando canales...</p>
+  </div>`;
+
+  let text = null;
+  let lastErr = '';
+
+  for (let i = 0; i < M3U_PROXIES.length; i++) {
+    try {
+      const url = M3U_PROXIES[i](M3U_URL);
+      const res = await fetch(url, { signal: AbortSignal.timeout(15000) });
+      if (!res.ok) { lastErr = 'HTTP ' + res.status; continue; }
+      const t = await res.text();
+      if (t.includes('#EXTINF')) { text = t; break; }
+      lastErr = 'Respuesta inválida';
+    } catch (e) {
+      lastErr = e.message;
+    }
+  }
+
+  if (!text) {
+    showLoading(false);
+    $chList.innerHTML = `<div class="empty-state">
+      <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+      <p>Sin conexión a los canales.<br>Revisa tu internet y<br><a href="#" onclick="loadM3U();return false;" style="color:var(--accent)">toca aquí para reintentar</a></p>
+    </div>`;
+    return;
+  }
+
   try {
-    let res = await fetch(getProxy(M3U_URL));
-    // retry with next proxy if fails
-    if (!res.ok) { nextProxy(); res = await fetch(getProxy(M3U_URL)); }
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    const text = await res.text();
     state.channels = parseM3U(text);
-    if (!state.channels.length) throw new Error('No se encontraron canales');
+    if (!state.channels.length) throw new Error('Lista vacía');
     state.filtered = [...state.channels];
     buildCategories();
     renderChannels();
     renderInfoGrid();
     $chCount.textContent = state.channels.length;
   } catch (e) {
-    showError('Error cargando catálogo: ' + e.message);
-    $chList.innerHTML = `<div class="empty-state">
-      <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-      <p>Error al cargar los canales.<br>Intenta recargar la página.</p>
-    </div>`;
+    $chList.innerHTML = `<div class="empty-state"><p>Error procesando canales.<br><a href="#" onclick="loadM3U();return false;" style="color:var(--accent)">Reintentar</a></p></div>`;
   } finally {
     showLoading(false);
   }
@@ -797,14 +838,14 @@ function playChannel(ch, retry = 0) {
       },
     });
     // Proxy the manifest URL itself
-    state.hls.loadSource(getProxy(url));
+    state.hls.loadSource(getStreamProxy(url));
     state.hls.attachMedia($video);
     state.hls.on(Hls.Events.MANIFEST_PARSED, () => $video.play().catch(() => {}));
     state.hls.on(Hls.Events.ERROR, (_, data) => {
       if (data.fatal) {
-        if (retry < PROXIES.length - 1) {
+        if (retry < STREAM_PROXIES.length - 1) {
           // Try next proxy silently
-          nextProxy();
+          nextStreamProxy();
           setTimeout(() => playChannel(ch, retry + 1), 600);
         } else {
           showError('No se pudo cargar el stream. Prueba otro canal.');
@@ -814,11 +855,11 @@ function playChannel(ch, retry = 0) {
     });
   } else if ($video.canPlayType('application/vnd.apple.mpegurl')) {
     // Safari native HLS — proxy the URL
-    $video.src = getProxy(url);
+    $video.src = getStreamProxy(url);
     $video.play().catch(() => {});
   } else {
     // Fallback: direct URL via proxy
-    $video.src = getProxy(url);
+    $video.src = getStreamProxy(url);
     $video.play().catch(() => showError('Formato no soportado por tu navegador.'));
   }
 
@@ -920,7 +961,7 @@ function castMedia(ch) {
   $castChName.textContent = ch.name;
 
   // Use proxied URL so Chromecast can reach the stream
-  const streamUrl = getProxy(ch.url);
+  const streamUrl = getStreamProxy(ch.url);
   const mediaInfo = new chrome.cast.media.MediaInfo(streamUrl, 'application/x-mpegURL');
   mediaInfo.streamType = chrome.cast.media.StreamType.LIVE;
   mediaInfo.metadata = new chrome.cast.media.GenericMediaMetadata();
