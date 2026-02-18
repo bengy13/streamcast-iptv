@@ -574,7 +574,7 @@
 <div class="error-toast" id="error-toast"></div>
 
 <script>
-// ── PROXIES — múltiples opciones con fallback automático ──
+// ── PROXIES — solo para cargar el catálogo M3U ──
 const M3U_PROXIES = [
   u => `https://corsproxy.io/?${encodeURIComponent(u)}`,
   u => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
@@ -582,32 +582,6 @@ const M3U_PROXIES = [
   u => `https://api.codetabs.com/v1/proxy?quest=${u}`,
   u => `https://cors.bridged.cc/${u}`,
 ];
-
-// Proxy para streams HLS (más liviano, sin encode)
-const STREAM_PROXIES = [
-  u => `https://corsproxy.io/?${encodeURIComponent(u)}`,
-  u => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
-  u => `https://thingproxy.freeboard.io/fetch/${u}`,
-];
-let streamProxyIdx = 0;
-function getStreamProxy(u) { return STREAM_PROXIES[streamProxyIdx % STREAM_PROXIES.length](u); }
-function nextStreamProxy() { streamProxyIdx = (streamProxyIdx + 1) % STREAM_PROXIES.length; }
-
-// Loader de HLS.js que pasa TODOS los segmentos por el proxy
-function makeProxyLoader() {
-  const Base = Hls.DefaultConfig.loader;
-  return class ProxyLoader extends Base {
-    load(ctx, cfg, cbs) {
-      const isAlready = ctx.url.includes('corsproxy.io') ||
-                        ctx.url.includes('allorigins.win') ||
-                        ctx.url.includes('thingproxy') ||
-                        ctx.url.includes('codetabs.com') ||
-                        ctx.url.includes('bridged.cc');
-      if (!isAlready) ctx.url = getStreamProxy(ctx.url);
-      super.load(ctx, cfg, cbs);
-    }
-  };
-}
 
 // ── STATE ──
 const state = {
@@ -805,13 +779,11 @@ function renderInfoGrid() {
 }
 
 // ── PLAY ──
-function playChannel(ch, retry = 0) {
+function playChannel(ch) {
   state.currentChannel = ch;
-  state.retryCount = retry;
   $npName.textContent = ch.name;
   $overlay.classList.add('hidden');
 
-  // Update active state in list
   document.querySelectorAll('.channel-item').forEach(el => el.classList.remove('active'));
   document.querySelectorAll('.channel-item').forEach(el => {
     if (state.filtered[+el.dataset.idx]?.url === ch.url) el.classList.add('active');
@@ -822,48 +794,29 @@ function playChannel(ch, retry = 0) {
     return;
   }
 
-  // Destroy prev HLS
   if (state.hls) { state.hls.destroy(); state.hls = null; }
 
   const url = ch.url;
 
   if (Hls.isSupported()) {
-    const ProxyLoader = makeProxyLoader();
-    state.hls = new Hls({
-      enableWorker: true,
-      lowLatencyMode: true,
-      loader: ProxyLoader,
-      xhrSetup: (xhr, u) => {
-        // Fallback: if XHR is used directly, also proxy it
-      },
-    });
-    // Proxy the manifest URL itself
-    state.hls.loadSource(getStreamProxy(url));
+    state.hls = new Hls({ enableWorker: true, lowLatencyMode: true });
+    state.hls.loadSource(url);
     state.hls.attachMedia($video);
     state.hls.on(Hls.Events.MANIFEST_PARSED, () => $video.play().catch(() => {}));
     state.hls.on(Hls.Events.ERROR, (_, data) => {
       if (data.fatal) {
-        if (retry < STREAM_PROXIES.length - 1) {
-          // Try next proxy silently
-          nextStreamProxy();
-          setTimeout(() => playChannel(ch, retry + 1), 600);
-        } else {
-          showError('No se pudo cargar el stream. Prueba otro canal.');
-          $overlay.classList.remove('hidden');
-        }
+        showError('No se pudo cargar el stream. Prueba otro canal.');
+        $overlay.classList.remove('hidden');
       }
     });
   } else if ($video.canPlayType('application/vnd.apple.mpegurl')) {
-    // Safari native HLS — proxy the URL
-    $video.src = getStreamProxy(url);
+    $video.src = url;
     $video.play().catch(() => {});
   } else {
-    // Fallback: direct URL via proxy
-    $video.src = getStreamProxy(url);
+    $video.src = url;
     $video.play().catch(() => showError('Formato no soportado por tu navegador.'));
   }
 
-  // Close sidebar on mobile
   if (window.innerWidth <= 700) $sidebar.classList.remove('open');
 }
 
@@ -960,9 +913,7 @@ function castMedia(ch) {
   if (!state.castSession) return;
   $castChName.textContent = ch.name;
 
-  // Use proxied URL so Chromecast can reach the stream
-  const streamUrl = getStreamProxy(ch.url);
-  const mediaInfo = new chrome.cast.media.MediaInfo(streamUrl, 'application/x-mpegURL');
+  const mediaInfo = new chrome.cast.media.MediaInfo(ch.url, 'application/x-mpegURL');
   mediaInfo.streamType = chrome.cast.media.StreamType.LIVE;
   mediaInfo.metadata = new chrome.cast.media.GenericMediaMetadata();
   mediaInfo.metadata.title = ch.name;
